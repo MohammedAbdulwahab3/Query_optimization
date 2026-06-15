@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Local sample-data store (embedded chdb)
+data/
+
+# Env / secrets
+.env
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Misc
+*.log
+.pytest_cache/
