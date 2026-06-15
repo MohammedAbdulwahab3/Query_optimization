@@ -60,6 +60,20 @@ docker compose up --build
 The ClickHouse HTTP interface is also exposed on `localhost:8123` for ad-hoc
 queries.
 
+### Option C — one-click public deploy (Render, free)
+
+Get a public URL you can open on your phone. Runs the **embedded** engine, so
+it's a single web service with no separate database to provision (see
+`render.yaml`).
+
+1. Push this repo to GitHub.
+2. Go to **[dashboard.render.com](https://dashboard.render.com) → New → Blueprint**.
+3. Connect this repository and click **Apply**.
+4. Open the generated `*.onrender.com` URL.
+
+> The free plan sleeps after inactivity, so the first request after a while
+> takes ~30–60s to cold-start and reseed the sample data.
+
 ---
 
 ## Architecture
