@@ -11,10 +11,20 @@ Detail Record) analytics tool** — built as an INSA Ethiopia internal demo.
 
 ![Analyst dashboard](docs/dashboard.png)
 
-_Dashboard showing a seeded subscriber: profile + stats, call-location map,
-contact network (force graph), shared-device / co-located detection, and the
-virtualized call timeline. (Map base tiles omitted in this capture; tower
-markers shown.)_
+_Subscriber investigation view: profile + stats, call-location map, risk flags,
+pattern-of-life heatmap, contact network (force graph), shared-device /
+co-located detection, movement trajectory, link analysis, co-location-in-time,
+and the virtualized call timeline._
+
+| Dataset-wide alerts | Audit log (live) |
+|---|---|
+| ![Alerts](docs/alerts.png) | ![Audit](docs/audit.png) |
+
+_Left: SIM-swap / burner / night-active detection across the whole dataset.
+Right: every analyst access recorded (note the **denied** entry — a number with
+no active warrant). Map base tiles are blank in these captures because OSM tiles
+are network-blocked in the build sandbox; markers render and tiles load in a
+real deployment._
 
 ## Architecture
 
