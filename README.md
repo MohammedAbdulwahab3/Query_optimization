@@ -92,10 +92,11 @@ Auth is **enforced** (set `AUTH_ENABLED=false` to bypass for local dev):
 - **Login** with an analyst credential → JWT (sent as `Authorization: Bearer`).
   Demo accounts: `agent.alem` / `insa-demo`, `supervisor.bekele` / `insa-demo`.
 - Every access to a specific number requires an **active warrant** covering it
-  (`telecom.warrants`); otherwise the API returns **403**. The ingest job seeds
-  warrants for the investigative targets (well-connected numbers, burners,
-  night owls, shared-device groups) — other numbers are denied, demonstrating
-  the control.
+  (`telecom.warrants`); otherwise the API returns **403**. By default the ingest
+  job seeds a warrant for **every subscriber in the dataset**, so any real number
+  opens; a number that isn't in the data (e.g. a typo) is denied — and the denial
+  is recorded in the audit log, demonstrating the control. (Warrant seeding runs
+  on every ingest start and repairs itself even if CDRs were already present.)
 - Every access (allowed **or** denied) is written to the **audit log**
   (`telecom.audit_log`) and shown live in the dashboard's *Audit* tab.
 
@@ -125,10 +126,9 @@ minutes (image pulls + seeding).
 
 ### What number do I search?
 
-Only numbers with an **active warrant** can be opened (others return 403 — by
-design). The empty search screen lists **clickable warranted sample numbers**,
-and every number in the **Alerts** tab is warranted too — click any of them to
-investigate.
+Every subscriber in the dataset is warranted by default, so any real number
+opens (a non-existent number returns 403). The empty search screen lists
+**clickable sample numbers**, and the **Alerts** tab numbers are clickable too.
 
 The generator also prints a handful of **interesting sample numbers** at the end
 of seeding — copy one into the dashboard search bar:
