@@ -20,10 +20,10 @@ func main() {
 	defer mg.close(context.Background())
 	cache := newCache(cfg.RedisAddr, cfg.CacheTTL)
 
-	h := &Handlers{ch: ch, mg: mg, cache: cache}
+	h := &Handlers{ch: ch, mg: mg, cache: cache, auth: newAuth(cfg)}
 	app := buildApp(h)
 
-	log.Printf("listening on :%s", cfg.Port)
+	log.Printf("listening on :%s (auth enabled: %v)", cfg.Port, cfg.AuthEnabled)
 	log.Fatal(app.Listen(":" + cfg.Port))
 }
 
@@ -42,12 +42,29 @@ func buildApp(h *Handlers) *fiber.App {
 		return c.JSON(fiber.Map{"status": "ok"})
 	})
 
-	// Auth seam: the pass-through stub guards every analytics route. Warrant
-	// checks slot in here later without touching handlers.
-	api := app.Group("/", authMiddleware)
-	api.Get("/search/:number", h.Search)
-	api.Get("/graph/:number", h.Graph)
-	api.Get("/timeline/:number", h.Timeline)
+	// Public auth endpoint.
+	app.Post("/auth/login", h.auth.Login)
+
+	// Everything below requires a valid analyst token. Targeted routes also
+	// pass through warrantGate (active-warrant check + audit). Dataset-wide
+	// routes are audited without a per-number warrant.
+	api := app.Group("/", h.requireAuth)
+	api.Get("/me", func(c *fiber.Ctx) error {
+		return c.JSON(fiber.Map{"analyst": c.Locals("analyst")})
+	})
+
+	api.Get("/search/:number", h.warrantGate, h.Search)
+	api.Get("/graph/:number", h.warrantGate, h.Graph)
+	api.Get("/timeline/:number", h.warrantGate, h.Timeline)
+	api.Get("/colocation/:number", h.warrantGate, h.CoLocation)
+	api.Get("/link/:a/:b", h.warrantGate, h.Link)
+	api.Get("/flags/:number", h.warrantGate, h.Flags)
+	api.Get("/patterns/:number", h.warrantGate, h.Patterns)
+	api.Get("/trajectory/:number", h.warrantGate, h.Trajectory)
+
+	api.Get("/alerts", h.auditOnly("alerts"), h.Alerts)
+	api.Get("/audit", h.auditOnly("audit"), h.Audit)
+	api.Get("/samples", h.Samples)
 	return app
 }
 

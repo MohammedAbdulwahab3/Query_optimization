@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -23,6 +24,11 @@ type Config struct {
 
 	RedisAddr string
 	CacheTTL  time.Duration
+
+	AuthEnabled bool
+	JWTSecret   string
+	TokenTTL    time.Duration
+	Analysts    map[string]string // username -> password (demo credentials)
 }
 
 func env(key, def string) string {
@@ -58,5 +64,41 @@ func loadConfig() Config {
 
 		RedisAddr: env("REDIS_ADDR", "redis:6379"),
 		CacheTTL:  time.Duration(ttlSec) * time.Second,
+
+		AuthEnabled: env("AUTH_ENABLED", "true") != "false",
+		JWTSecret:   env("JWT_SECRET", "insa-cdr-demo-secret-change-me"),
+		TokenTTL:    time.Duration(envInt("TOKEN_TTL_HOURS", 8)) * time.Hour,
+		Analysts:    parseAnalysts(env("ANALYSTS", "agent.alem:insa-demo,supervisor.bekele:insa-demo")),
 	}
+}
+
+// parseAnalysts reads "user:pass,user:pass" into a map. Demo-only credential
+// store; a real deployment would use an identity provider.
+func parseAnalysts(s string) map[string]string {
+	m := map[string]string{}
+	for _, pair := range splitNonEmpty(s, ",") {
+		if i := indexByte(pair, ':'); i > 0 {
+			m[pair[:i]] = pair[i+1:]
+		}
+	}
+	return m
+}
+
+func splitNonEmpty(s, sep string) []string {
+	out := []string{}
+	for _, p := range strings.Split(s, sep) {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func indexByte(s string, b byte) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == b {
+			return i
+		}
+	}
+	return -1
 }

@@ -11,10 +11,20 @@ Detail Record) analytics tool** — built as an INSA Ethiopia internal demo.
 
 ![Analyst dashboard](docs/dashboard.png)
 
-_Dashboard showing a seeded subscriber: profile + stats, call-location map,
-contact network (force graph), shared-device / co-located detection, and the
-virtualized call timeline. (Map base tiles omitted in this capture; tower
-markers shown.)_
+_Subscriber investigation view: profile + stats, call-location map, risk flags,
+pattern-of-life heatmap, contact network (force graph), shared-device /
+co-located detection, movement trajectory, link analysis, co-location-in-time,
+and the virtualized call timeline._
+
+| Dataset-wide alerts | Audit log (live) |
+|---|---|
+| ![Alerts](docs/alerts.png) | ![Audit](docs/audit.png) |
+
+_Left: SIM-swap / burner / night-active detection across the whole dataset.
+Right: every analyst access recorded (note the **denied** entry — a number with
+no active warrant). Map base tiles are blank in these captures because OSM tiles
+are network-blocked in the build sandbox; markers render and tiles load in a
+real deployment._
 
 ## Architecture
 
@@ -48,22 +58,52 @@ Built incrementally; each layer verified before the next.
 
 - [x] **ClickHouse schema + rollups** (`clickhouse/schema.sql`) — verified
 - [x] **Ingest** — synthetic generator, dual-write (`ingest/`) — verified
-- [x] **Go Fiber API** — `/search` `/graph` `/timeline`, Redis cache, auth stub (`api/`) — verified
-- [x] **React dashboard** — search, profile, Leaflet map, force-graph, virtualized timeline (`web/`) — builds
+- [x] **Go Fiber API** — search/graph/timeline + analytics, Redis cache (`api/`) — verified
+- [x] **React dashboard** — profile, map, force-graph, timeline + analytics tabs (`web/`) — builds
 - [x] **docker-compose wiring** + run instructions
+- [x] **Analytics** — link analysis, co-location-in-time, suspicious-pattern detection, pattern-of-life, movement trajectory
+- [x] **Auth layer** — analyst login (JWT), warrant enforcement, audit log
 
 ### API endpoints
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /search/:number` | profile (name, operator, device, IMEI, IMSI, reg date) + call count + total minutes + map points |
-| `GET /graph/:number?depth=1\|2` | contact network (force-graph nodes/links) + shared devices + co-located towers |
+| `POST /auth/login` | analyst login → JWT (`{username, password}`) |
+| `GET /me` | current analyst identity |
+| `GET /search/:number` | profile + call count + total minutes + map points |
+| `GET /graph/:number?depth=1\|2` | contact network (force-graph) + shared devices + co-located towers |
 | `GET /timeline/:number?page=&page_size=&from=&to=` | paginated call records with date-range filter |
-| `GET /health` | health check |
+| `GET /flags/:number` | risk flags: shared device / SIM-swap, burner, late-night, mostly-outgoing |
+| `GET /patterns/:number` | day×hour call heatmap + inferred home/work towers |
+| `GET /trajectory/:number?from=&to=&limit=` | tower connections in time order (movement playback) |
+| `GET /colocation/:number?window=<min>` | others at the same tower within ±window minutes |
+| `GET /link/:a/:b` | direct calls, common contacts, shared towers, shortest path between two numbers |
+| `GET /alerts` | dataset-wide SIM-swap / burner / night-active detection |
+| `GET /audit` | recent analyst access log |
+| `GET /health` | health check (public) |
 
 All queries are **parameterized** (`?` bindings for ClickHouse, `$param` for
-Cypher). A short-TTL Redis cache fronts every result. A pass-through
-**auth middleware stub** guards every route — the seam for warrant checks.
+Cypher). A short-TTL Redis cache fronts read results.
+
+### Auth, warrants & audit (lawful-interception controls)
+
+Auth is **enforced** (set `AUTH_ENABLED=false` to bypass for local dev):
+
+- **Login** with an analyst credential → JWT (sent as `Authorization: Bearer`).
+  Demo accounts: `agent.alem` / `insa-demo`, `supervisor.bekele` / `insa-demo`.
+- Every access to a specific number requires an **active warrant** covering it
+  (`telecom.warrants`); otherwise the API returns **403**. The ingest job seeds
+  warrants for the investigative targets (well-connected numbers, burners,
+  night owls, shared-device groups) — other numbers are denied, demonstrating
+  the control.
+- Every access (allowed **or** denied) is written to the **audit log**
+  (`telecom.audit_log`) and shown live in the dashboard's *Audit* tab.
+
+```bash
+TOKEN=$(curl -s localhost:8080/auth/login -H 'content-type: application/json' \
+  -d '{"username":"agent.alem","password":"insa-demo"}' | jq -r .token)
+curl -s localhost:8080/search/<number> -H "Authorization: Bearer $TOKEN"
+```
 
 ## Quick start
 
@@ -85,8 +125,13 @@ minutes (image pulls + seeding).
 
 ### What number do I search?
 
-The generator prints a handful of **interesting sample numbers** at the end of
-seeding — copy one into the dashboard search bar:
+Only numbers with an **active warrant** can be opened (others return 403 — by
+design). The empty search screen lists **clickable warranted sample numbers**,
+and every number in the **Alerts** tab is warranted too — click any of them to
+investigate.
+
+The generator also prints a handful of **interesting sample numbers** at the end
+of seeding — copy one into the dashboard search bar:
 
 ```bash
 docker compose logs ingest | grep -A12 "SAMPLE NUMBERS"

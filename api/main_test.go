@@ -1,31 +1,43 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
-// These tests exercise the HTTP layer — routing, the auth-stub middleware,
-// number validation, and the error handler — without any live datastore.
-// Invalid numbers are rejected before any store access, so nil stores are safe
-// here; the cache with a nil Redis client degrades to a no-op.
+func testHandlers(authEnabled bool) *Handlers {
+	return &Handlers{
+		cache: &Cache{},
+		auth: &Auth{
+			secret:   []byte("test-secret"),
+			ttl:      time.Hour,
+			enabled:  authEnabled,
+			analysts: map[string]string{"agent.alem": "pw"},
+		},
+	}
+}
+
+// With auth disabled, requireAuth/warrantGate pass through, so we can exercise
+// routing, number validation, and the error handler without live datastores.
 func TestValidation(t *testing.T) {
-	app := buildApp(&Handlers{cache: &Cache{}})
+	app := buildApp(testHandlers(false))
 
 	cases := []struct {
 		path string
 		want int
 	}{
 		{"/health", 200},
-		{"/search/abc", 400},       // non-numeric
-		{"/search/123", 400},       // too short (<6 digits)
-		{"/graph/notanumber", 400}, // non-numeric
+		{"/search/abc", 400},
+		{"/search/123", 400},
+		{"/graph/notanumber", 400},
 		{"/timeline/12x45678", 400},
 	}
 	for _, tc := range cases {
-		req := httptest_NewRequest(tc.path)
+		req, _ := http.NewRequest(http.MethodGet, tc.path, nil)
 		resp, err := app.Test(req, -1)
 		if err != nil {
 			t.Fatalf("%s: %v", tc.path, err)
@@ -35,6 +47,39 @@ func TestValidation(t *testing.T) {
 			t.Errorf("%s: got %d want %d (%s)", tc.path, resp.StatusCode, tc.want,
 				strings.TrimSpace(string(body)))
 		}
+	}
+}
+
+func TestAuth(t *testing.T) {
+	app := buildApp(testHandlers(true))
+
+	// protected route without a token -> 401 (before any datastore access)
+	req, _ := http.NewRequest(http.MethodGet, "/search/251911000001", nil)
+	resp, _ := app.Test(req, -1)
+	if resp.StatusCode != 401 {
+		t.Errorf("no token: got %d want 401", resp.StatusCode)
+	}
+
+	// bad credentials -> 401
+	req, _ = http.NewRequest(http.MethodPost, "/auth/login",
+		bytes.NewReader([]byte(`{"username":"agent.alem","password":"wrong"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ = app.Test(req, -1)
+	if resp.StatusCode != 401 {
+		t.Errorf("bad creds: got %d want 401", resp.StatusCode)
+	}
+
+	// good credentials -> 200 + a token that verifies
+	req, _ = http.NewRequest(http.MethodPost, "/auth/login",
+		bytes.NewReader([]byte(`{"username":"agent.alem","password":"pw"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ = app.Test(req, -1)
+	if resp.StatusCode != 200 {
+		t.Fatalf("login: got %d want 200", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "token") {
+		t.Errorf("login response missing token: %s", body)
 	}
 }
 
@@ -51,9 +96,4 @@ func TestNumberRegex(t *testing.T) {
 			t.Errorf("expected %q to be invalid", b)
 		}
 	}
-}
-
-func httptest_NewRequest(path string) *http.Request {
-	req, _ := http.NewRequest(http.MethodGet, path, nil)
-	return req
 }

@@ -66,6 +66,11 @@ services:
       MEMGRAPH_URI: bolt://memgraph:7687
       REDIS_ADDR: redis:6379
       CACHE_TTL_SECONDS: "30"
+      # Auth + warrant enforcement + audit log. Set AUTH_ENABLED=false to bypass.
+      AUTH_ENABLED: "true"
+      JWT_SECRET: "insa-cdr-demo-secret-change-me"
+      ANALYSTS: "agent.alem:insa-demo,supervisor.bekele:insa-demo"
+      TOKEN_TTL_HOURS: "8"
     depends_on:
       clickhouse: { condition: service_healthy }
       memgraph: { condition: service_healthy }

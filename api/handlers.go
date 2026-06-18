@@ -14,6 +14,7 @@ type Handlers struct {
 	ch    *CHStore
 	mg    *MGStore
 	cache *Cache
+	auth  *Auth
 }
 
 var numberRe = regexp.MustCompile(`^\d{6,15}$`)
@@ -138,6 +139,132 @@ func (h *Handlers) Timeline(c *fiber.Ctx) error {
 			Records: records,
 		}, nil
 	})
+}
+
+// GET /link/:a/:b
+func (h *Handlers) Link(c *fiber.Ctx) error {
+	a := c.Params("a")
+	b := c.Params("b")
+	if !validNumber(a) || !validNumber(b) {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid number format")
+	}
+	key := fmt.Sprintf("link:%s:%s", a, b)
+	return h.cached(c, key, func() (any, error) {
+		ctx, cancel := context.WithTimeout(c.UserContext(), 20*time.Second)
+		defer cancel()
+		return h.mg.Link(ctx, a, b)
+	})
+}
+
+// GET /colocation/:number?window=<minutes>
+type CoLocationResponse struct {
+	Number    string           `json:"number"`
+	WindowMin int              `json:"window_minutes"`
+	CoLocated []CoLocatedEvent `json:"co_located"`
+}
+
+func (h *Handlers) CoLocation(c *fiber.Ctx) error {
+	number := c.Params("number")
+	if !validNumber(number) {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid number format")
+	}
+	windowMin := c.QueryInt("window", 10)
+	if windowMin < 1 {
+		windowMin = 1
+	} else if windowMin > 120 {
+		windowMin = 120
+	}
+	key := fmt.Sprintf("colo:%s:%d", number, windowMin)
+	return h.cached(c, key, func() (any, error) {
+		ctx, cancel := context.WithTimeout(c.UserContext(), 20*time.Second)
+		defer cancel()
+		events, err := h.ch.CoLocationInTime(ctx, number, windowMin*60, 50)
+		if err != nil {
+			return nil, err
+		}
+		return CoLocationResponse{Number: number, WindowMin: windowMin, CoLocated: events}, nil
+	})
+}
+
+// GET /patterns/:number
+func (h *Handlers) Patterns(c *fiber.Ctx) error {
+	number := c.Params("number")
+	if !validNumber(number) {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid number format")
+	}
+	return h.cached(c, "patterns:"+number, func() (any, error) {
+		ctx, cancel := context.WithTimeout(c.UserContext(), 15*time.Second)
+		defer cancel()
+		return h.ch.Patterns(ctx, number)
+	})
+}
+
+// GET /trajectory/:number?from=&to=&limit=
+func (h *Handlers) Trajectory(c *fiber.Ctx) error {
+	number := c.Params("number")
+	if !validNumber(number) {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid number format")
+	}
+	from := parseDate(c.Query("from"), time.Now().AddDate(-10, 0, 0))
+	to := parseDate(c.Query("to"), time.Now().AddDate(0, 0, 1))
+	limit := c.QueryInt("limit", 500)
+	if limit < 1 {
+		limit = 500
+	} else if limit > 2000 {
+		limit = 2000
+	}
+	key := fmt.Sprintf("traj:%s:%d:%d:%d", number, from.Unix(), to.Unix(), limit)
+	return h.cached(c, key, func() (any, error) {
+		ctx, cancel := context.WithTimeout(c.UserContext(), 15*time.Second)
+		defer cancel()
+		return h.ch.Trajectory(ctx, number, from, to, limit)
+	})
+}
+
+// GET /flags/:number
+func (h *Handlers) Flags(c *fiber.Ctx) error {
+	number := c.Params("number")
+	if !validNumber(number) {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid number format")
+	}
+	return h.cached(c, "flags:"+number, func() (any, error) {
+		ctx, cancel := context.WithTimeout(c.UserContext(), 15*time.Second)
+		defer cancel()
+		return h.ch.Flags(ctx, number)
+	})
+}
+
+// GET /alerts
+func (h *Handlers) Alerts(c *fiber.Ctx) error {
+	return h.cached(c, "alerts", func() (any, error) {
+		ctx, cancel := context.WithTimeout(c.UserContext(), 30*time.Second)
+		defer cancel()
+		return h.ch.Alerts(ctx, 50)
+	})
+}
+
+// GET /samples — a few warranted numbers to suggest on the empty search screen.
+func (h *Handlers) Samples(c *fiber.Ctx) error {
+	return h.cached(c, "samples", func() (any, error) {
+		ctx, cancel := context.WithTimeout(c.UserContext(), 15*time.Second)
+		defer cancel()
+		samples, err := h.ch.WarrantedSamples(ctx, 8)
+		if err != nil {
+			return nil, err
+		}
+		return fiber.Map{"samples": samples}, nil
+	})
+}
+
+// GET /audit — recent analyst access log (not cached; always fresh).
+func (h *Handlers) Audit(c *fiber.Ctx) error {
+	ctx, cancel := context.WithTimeout(c.UserContext(), 15*time.Second)
+	defer cancel()
+	entries, err := h.ch.RecentAudit(ctx, 200)
+	if err != nil {
+		return err
+	}
+	return c.JSON(fiber.Map{"entries": entries})
 }
 
 func parseDate(s string, def time.Time) time.Time {
