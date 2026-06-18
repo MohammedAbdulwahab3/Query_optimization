@@ -63,15 +63,31 @@ class ClickHouseWriter:
         except Exception:  # noqa: BLE001
             return 0
 
-    def insert_warrants(self, rows: list[tuple]) -> None:
-        # columns: warrant_id, target_number, analyst, reason, valid_from, valid_to
-        self.client.insert(
-            table="warrants",
-            data=rows,
-            column_names=["warrant_id", "target_number", "analyst", "reason",
-                          "valid_from", "valid_to"],
-            database=self.database,
-        )
+    def ensure_all_warrants(self, force: bool = False) -> int:
+        """Seed a warrant for every number present in the CDRs (as A- or B-party)
+        so the demo never denies an existing number. Idempotent: skips if
+        warrants already exist (unless force). Runs entirely server-side."""
+        if not force and self.warrant_count() > 0:
+            print("[ingest] warrants already present; skipping warrant seed.")
+            return self.warrant_count()
+        db = self.database
+        self.client.command(f"""
+            INSERT INTO {db}.warrants
+                (warrant_id, target_number, analyst, reason, valid_from, valid_to)
+            SELECT concat('W-', number) AS warrant_id, number AS target_number,
+                   'agent.alem' AS analyst,
+                   'Active monitoring (demo: all subscribers warranted)' AS reason,
+                   now() - INTERVAL 30 DAY AS valid_from,
+                   now() + INTERVAL 90 DAY AS valid_to
+            FROM (
+                SELECT caller_number AS number FROM {db}.cdr
+                UNION DISTINCT
+                SELECT callee_number AS number FROM {db}.cdr
+            )
+        """)
+        n = self.warrant_count()
+        print(f"[ingest] seeded {n} warrants (all subscribers).")
+        return n
 
 
 # ---------------------------------------------------------------------------
