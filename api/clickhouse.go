@@ -182,6 +182,60 @@ type CoLocatedEvent struct {
 
 // --- auth: warrants + audit log ---
 
+type SampleTarget struct {
+	Number string `json:"number"`
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
+}
+
+// WarrantedSamples returns a few warranted numbers (with subscriber names) to
+// suggest on the empty search screen, so analysts know what they can open.
+func (s *CHStore) WarrantedSamples(ctx context.Context, limit int) ([]SampleTarget, error) {
+	rows, err := s.conn.Query(ctx, fmt.Sprintf(`
+		SELECT target_number, any(reason) AS reason
+		FROM %s.warrants
+		GROUP BY target_number
+		ORDER BY target_number
+		LIMIT ?`, s.db), limit)
+	if err != nil {
+		return nil, err
+	}
+	out := []SampleTarget{}
+	nums := []string{}
+	for rows.Next() {
+		var t SampleTarget
+		if err := rows.Scan(&t.Number, &t.Reason); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		out = append(out, t)
+		nums = append(nums, t.Number)
+	}
+	rows.Close()
+	if len(nums) == 0 {
+		return out, nil
+	}
+
+	// names via a primary-key IN lookup (cheap)
+	names := map[string]string{}
+	nr, err := s.conn.Query(ctx, fmt.Sprintf(`
+		SELECT caller_number, any(subscriber_name) AS name
+		FROM %s.cdr WHERE caller_number IN (?) GROUP BY caller_number`, s.db), nums)
+	if err == nil {
+		for nr.Next() {
+			var num, name string
+			if nr.Scan(&num, &name) == nil {
+				names[num] = name
+			}
+		}
+		nr.Close()
+	}
+	for i := range out {
+		out[i].Name = names[out[i].Number]
+	}
+	return out, nil
+}
+
 // ActiveWarrant returns the id of an active warrant covering number, or "".
 func (s *CHStore) ActiveWarrant(ctx context.Context, number string) (string, error) {
 	var id string

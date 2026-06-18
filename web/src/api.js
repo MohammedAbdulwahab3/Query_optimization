@@ -96,6 +96,14 @@ export function useTrajectory(number) {
   });
 }
 
+export function useSamples(enabled) {
+  return useQuery({
+    queryKey: ["samples"],
+    queryFn: () => getJSON(`/samples`),
+    enabled: !!enabled,
+  });
+}
+
 export function useFlags(number) {
   return useQuery({
     queryKey: ["flags", number],

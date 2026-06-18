@@ -64,6 +64,7 @@ func buildApp(h *Handlers) *fiber.App {
 
 	api.Get("/alerts", h.auditOnly("alerts"), h.Alerts)
 	api.Get("/audit", h.auditOnly("audit"), h.Audit)
+	api.Get("/samples", h.Samples)
 	return app
 }
 

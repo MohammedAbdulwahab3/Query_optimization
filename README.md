@@ -125,8 +125,13 @@ minutes (image pulls + seeding).
 
 ### What number do I search?
 
-The generator prints a handful of **interesting sample numbers** at the end of
-seeding — copy one into the dashboard search bar:
+Only numbers with an **active warrant** can be opened (others return 403 — by
+design). The empty search screen lists **clickable warranted sample numbers**,
+and every number in the **Alerts** tab is warranted too — click any of them to
+investigate.
+
+The generator also prints a handful of **interesting sample numbers** at the end
+of seeding — copy one into the dashboard search bar:
 
 ```bash
 docker compose logs ingest | grep -A12 "SAMPLE NUMBERS"

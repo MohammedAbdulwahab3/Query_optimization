@@ -12,6 +12,7 @@ import TrajectoryPanel from "./components/TrajectoryPanel.jsx";
 import AlertsView from "./components/AlertsView.jsx";
 import AuditView from "./components/AuditView.jsx";
 import LoginScreen from "./components/LoginScreen.jsx";
+import SampleTargets from "./components/SampleTargets.jsx";
 import { useSearch, useGraph, getToken, clearToken } from "./api.js";
 
 export default function App() {
@@ -72,6 +73,7 @@ export default function App() {
               <p className="muted">Access is gated by an active <strong>warrant</strong>; every
                 lookup is recorded in the <strong>Audit</strong> log. Open <strong>Alerts</strong>
                 for dataset-wide suspicious patterns.</p>
+              <SampleTargets onPick={pick} />
             </div>
           )}
 

@@ -95,6 +95,13 @@ body {
 .pager button:disabled { opacity: 0.4; cursor: default; }
 
 .empty { text-align: center; color: var(--text); padding: 40px 0; }
+.samples { margin-top: 24px; }
+.sample-chips { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; max-width: 820px; margin: 8px auto 0; }
+.sample-chip { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; cursor: pointer; text-align: left; }
+.sample-chip:hover { border-color: var(--accent); }
+.sample-num { font-family: ui-monospace, monospace; color: var(--accent); font-size: 13px; }
+.sample-name { font-size: 13px; }
+.sample-reason { font-size: 11px; color: var(--muted); }
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
 .error { color: #f44336; }

@@ -243,6 +243,19 @@ func (h *Handlers) Alerts(c *fiber.Ctx) error {
 	})
 }
 
+// GET /samples — a few warranted numbers to suggest on the empty search screen.
+func (h *Handlers) Samples(c *fiber.Ctx) error {
+	return h.cached(c, "samples", func() (any, error) {
+		ctx, cancel := context.WithTimeout(c.UserContext(), 15*time.Second)
+		defer cancel()
+		samples, err := h.ch.WarrantedSamples(ctx, 8)
+		if err != nil {
+			return nil, err
+		}
+		return fiber.Map{"samples": samples}, nil
+	})
+}
+
 // GET /audit — recent analyst access log (not cached; always fresh).
 func (h *Handlers) Audit(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(c.UserContext(), 15*time.Second)
