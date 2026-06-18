@@ -1,55 +1,104 @@
-# Production-style deployment: a real clickhouse-server plus the FastAPI app
-# (which also serves the dashboard). Bring it all up with:
+# Telecom CDR Analytics — full stack.
 #
 #     docker compose up --build
 #
-# then open http://localhost:8000
+# Brings up ClickHouse, Memgraph, Redis, the Go API, and the React dashboard,
+# then runs the ingest job once to seed ~500k synthetic CDRs across ~2000
+# subscribers (dual-written to ClickHouse + Memgraph).
+#
+#   Dashboard : http://localhost:3000
+#   API       : http://localhost:8080
+#   ClickHouse: http://localhost:8123  (HTTP, ad-hoc queries)
+#   Memgraph  : bolt://localhost:7687
 services:
   clickhouse:
     image: clickhouse/clickhouse-server:24.8
-    container_name: ch-analytics-db
-    environment:
-      CLICKHOUSE_DB: default
-      CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: ""
-      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    container_name: cdr-clickhouse
     ulimits:
-      nofile:
-        soft: 262144
-        hard: 262144
+      nofile: { soft: 262144, hard: 262144 }
+    environment:
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
     volumes:
       - ch-data:/var/lib/clickhouse
+      # schema.sql runs on first init: creates the telecom DB, CDR table,
+      # rollups, MVs, and the callee projection.
+      - ./clickhouse/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    ports:
+      - "8123:8123"   # HTTP (ingest + ad-hoc)
+      - "9000:9000"   # native (Go API)
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
       interval: 5s
       timeout: 3s
-      retries: 20
-    ports:
-      - "8123:8123"   # HTTP interface (handy for ad-hoc queries)
+      retries: 30
 
-  backend:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    container_name: ch-analytics-api
-    environment:
-      CH_BACKEND: server
-      CH_HOST: clickhouse
-      CH_PORT: "8123"
-      CH_USER: default
-      CH_PASSWORD: ""
-      CH_DATABASE: analytics
-      AUTO_SEED: "true"
-      # ~1.1M events generated server-side on first startup.
-      SEED_SESSIONS: "1000000"
-      SEED_USERS: "80000"
-      SEED_PRODUCTS: "800"
-      SEED_DAYS: "90"
-    depends_on:
-      clickhouse:
-        condition: service_healthy
+  memgraph:
+    image: memgraph/memgraph:2.18.1
+    container_name: cdr-memgraph
+    command: ["--log-level=WARNING", "--also-log-to-stderr"]
     ports:
-      - "8000:8000"
+      - "7687:7687"
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/localhost/7687' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    container_name: cdr-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./api
+    container_name: cdr-api
+    environment:
+      PORT: "8080"
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "9000"      # native protocol
+      CLICKHOUSE_DATABASE: telecom
+      MEMGRAPH_URI: bolt://memgraph:7687
+      REDIS_ADDR: redis:6379
+      CACHE_TTL_SECONDS: "30"
+    depends_on:
+      clickhouse: { condition: service_healthy }
+      memgraph: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    ports:
+      - "8080:8080"
+
+  web:
+    build: ./web
+    container_name: cdr-web
+    depends_on:
+      - api
+    ports:
+      - "3000:80"
+
+  ingest:
+    build: ./ingest
+    container_name: cdr-ingest
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"      # HTTP (clickhouse-connect)
+      CLICKHOUSE_DATABASE: telecom
+      MEMGRAPH_URI: bolt://memgraph:7687
+      NUM_SUBSCRIBERS: "2000"
+      NUM_CALLS: "500000"
+      BATCH_SIZE: "50000"
+      SEED: "42"
+      # Set FORCE_RESEED=true to wipe and regenerate on an existing volume.
+      FORCE_RESEED: "false"
+    depends_on:
+      clickhouse: { condition: service_healthy }
+      memgraph: { condition: service_healthy }
+    restart: "no"
 
 volumes:
   ch-data:

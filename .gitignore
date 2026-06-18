@@ -1,4 +1,4 @@
-# Python
+# Python (ingest)
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -6,8 +6,19 @@ __pycache__/
 venv/
 env/
 
-# Local sample-data store (embedded chdb)
+# Go (api)
+api/bin/
+api/tmp/
+*.test
+
+# Node / Vite (web)
+node_modules/
+web/dist/
+web/.vite/
+
+# Local data / volumes
 data/
+*.local
 
 # Env / secrets
 .env
@@ -20,3 +31,6 @@ data/
 # Misc
 *.log
 .pytest_cache/
+
+# Go API compiled binary
+api/telecom-cdr-api

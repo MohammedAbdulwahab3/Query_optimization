@@ -1,199 +1,145 @@
-# ClickHouse E-commerce Analytics
+# Telecom CDR Analytics Platform
 
-A full-stack analytics platform: **FastAPI** + **ClickHouse**, with a large,
-realistic e-commerce clickstream dataset, **18 optimized analytics — each
-exposed as its own API endpoint** — and a single-page dashboard that
-visualizes them all.
+A polyglot, docker-compose monorepo demo of a **lawful-interception CDR (Call
+Detail Record) analytics tool** — built as an INSA Ethiopia internal demo.
 
-![Dashboard](docs/dashboard.png)
+> ⚠️ **Demo / educational build.** All data is **synthetic** (generated with
+> Faker). Court/warrant authorization is **out of scope** for this build and
+> will be added later as an auth layer — the code leaves clean seams for it (a
+> pass-through auth middleware stub on every API route, and an unused
+> `warrant_id` column on the CDR table).
 
----
+![Analyst dashboard](docs/dashboard.png)
 
-## Highlights
-
-- **18 analytics, one endpoint each** under `/api/analytics/*` (KPIs, revenue
-  trends, conversion funnel, retention cohorts, geo/device/channel breakdowns,
-  traffic heatmap, and more).
-- **Optimized ClickHouse SQL** — `LowCardinality` columns, monthly partitions,
-  a tuned sort key, data-skipping indexes, `-If` aggregate combinators, and
-  aggregate-then-join patterns.
-- **Realistic sample data** — ~1M+ funnel-correlated events generated entirely
-  inside ClickHouse via `INSERT … SELECT FROM numbers()` (seeds in under a
-  second).
-- **Two interchangeable backends, identical SQL:**
-  - `embedded` — in-process [`chdb`](https://github.com/chdb-io/chdb) (ClickHouse
-    as a Python library). **Zero external services** — great for self-use.
-  - `server` — a real `clickhouse-server` over HTTP (used by Docker Compose).
-- **Self-contained frontend** — vanilla JS + a vendored Chart.js (no CDN), served
-  by FastAPI.
-
----
-
-## Quick start
-
-### Option A — zero dependencies (embedded engine)
-
-No database to install. Uses `chdb` and seeds sample data on first launch.
-
-```bash
-./scripts/run_local.sh
-# open http://localhost:8000
-```
-
-Or manually:
-
-```bash
-cd backend
-pip install -r requirements.txt
-CH_BACKEND=embedded uvicorn app.main:app --reload
-```
-
-### Option B — full deployment (Docker Compose)
-
-Spins up a real `clickhouse-server` + the API/dashboard, and seeds ~1.1M events.
-
-```bash
-docker compose up --build
-# open http://localhost:8000
-```
-
-The ClickHouse HTTP interface is also exposed on `localhost:8123` for ad-hoc
-queries.
-
-### Option C — one-click public deploy (Render, free)
-
-Get a public URL you can open on your phone. Runs the **embedded** engine, so
-it's a single web service with no separate database to provision (see
-`render.yaml`).
-
-1. Push this repo to GitHub.
-2. Go to **[dashboard.render.com](https://dashboard.render.com) → New → Blueprint**.
-3. Connect this repository and click **Apply**.
-4. Open the generated `*.onrender.com` URL.
-
-> The free plan sleeps after inactivity, so the first request after a while
-> takes ~30–60s to cold-start and reseed the sample data.
-
----
+_Dashboard showing a seeded subscriber: profile + stats, call-location map,
+contact network (force graph), shared-device / co-located detection, and the
+virtualized call timeline. (Map base tiles omitted in this capture; tower
+markers shown.)_
 
 ## Architecture
 
+One synthetic ingest stream fans out to two stores; a Go API reads both (with a
+Redis cache) and serves a React analyst dashboard.
+
 ```
-                    ┌──────────────────────────────────────┐
-   Browser  ──────▶ │  FastAPI  (backend/app)               │
-   (dashboard)      │  • /api/analytics/*  — 18 endpoints   │
-                    │  • serves static dashboard at /       │
-                    │            │                          │
-                    │   db.py (pluggable)                   │
-                    │      ├── EmbeddedDatabase  (chdb)      │
-                    │      └── ServerDatabase    (HTTP) ─────┼──▶ clickhouse-server
-                    └──────────────────────────────────────┘
+                 ┌─────────────────────────────────────────────┐
+  ingest (Py) ──▶│  ClickHouse   raw CDRs + rollups (counts,    │
+   Faker, dual   │               minutes, map points)           │
+   write         │  Memgraph     contact graph (shared devices, │
+                 │               co-located towers)             │
+                 └───────────────┬───────────────┬─────────────┘
+                                 │               │
+                        ┌────────▼───────────────▼────────┐
+   React (Vite +  ◀────▶│  Go (Fiber) REST API + Redis cache│
+   TanStack Query)      │  /search /graph /timeline         │
+                        └───────────────────────────────────┘
 ```
 
-Both database implementations satisfy the same `Database` interface and run the
-**exact same SQL**, so switching is a single env var (`CH_BACKEND`).
+| Component   | Tech | Role |
+|-------------|------|------|
+| `clickhouse/` | ClickHouse | raw 26-col CDR table + pre-aggregated rollups + callee projection |
+| `ingest/`     | Python (Faker) | synthetic CDR generator, dual-write to ClickHouse + Memgraph |
+| `api/`        | Go (Fiber) + Redis | REST API over both stores, parameterized queries, auth stub |
+| `web/`        | React + Vite + TanStack Query | analyst dashboard (profile, Leaflet map, force-graph, timeline) |
 
-### Data model (star schema)
+## Status
 
-| Table      | Role             | Notes |
-|------------|------------------|-------|
-| `events`   | fact (clickstream) | wide & denormalized; `MergeTree`, `PARTITION BY toYYYYMM(event_date)`, `ORDER BY (event_type, event_date, user_id, session_id)`, skip indexes on `product_id`/`brand` |
-| `products` | dimension        | product names/categories/brands/prices |
-| `users`    | dimension        | signup date + attributes (used for cohorts) |
+Built incrementally; each layer verified before the next.
 
-Event types form a funnel: `page_view → view_item → add_to_cart →
-begin_checkout → purchase`. The seeder assigns each session a weighted funnel
-depth and explodes it with `arrayJoin`, so purchasers always have their
-upstream events and the funnel/retention numbers are realistic.
+- [x] **ClickHouse schema + rollups** (`clickhouse/schema.sql`) — verified
+- [x] **Ingest** — synthetic generator, dual-write (`ingest/`) — verified
+- [x] **Go Fiber API** — `/search` `/graph` `/timeline`, Redis cache, auth stub (`api/`) — verified
+- [x] **React dashboard** — search, profile, Leaflet map, force-graph, virtualized timeline (`web/`) — builds
+- [x] **docker-compose wiring** + run instructions
 
----
-
-## API
-
-Interactive docs (Swagger UI) at **`/docs`**. Every endpoint accepts the same
-optional query parameters:
-
-| Param | Default | Description |
-|-------|---------|-------------|
-| `days` | `30` | lookback window (1–365) |
-| `country`, `category`, `device`, `channel` | – | optional equality filters |
-| `limit` | `10` | for top-N / table endpoints |
+### API endpoints
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /api/analytics/kpis` | revenue, orders, users, sessions, conversion, AOV |
-| `GET /api/analytics/revenue-over-time` | daily revenue & orders |
-| `GET /api/analytics/revenue-by-category` | revenue per category |
-| `GET /api/analytics/category-revenue-trend` | revenue per category per day |
-| `GET /api/analytics/top-products` | top products by revenue (joins `products`) |
-| `GET /api/analytics/top-brands` | top brands by revenue |
-| `GET /api/analytics/conversion-funnel` | sessions per funnel stage |
-| `GET /api/analytics/sales-by-country` | revenue/orders/users by country |
-| `GET /api/analytics/sales-by-device` | sessions/orders/revenue by device |
-| `GET /api/analytics/sales-by-channel` | marketing channel performance |
-| `GET /api/analytics/new-vs-returning` | new vs returning split |
-| `GET /api/analytics/aov-over-time` | average order value per day |
-| `GET /api/analytics/cart-abandonment` | cart abandonment rate |
-| `GET /api/analytics/hourly-traffic` | events/sessions per hour |
-| `GET /api/analytics/traffic-heatmap` | day-of-week × hour activity |
-| `GET /api/analytics/session-metrics` | events/session, session duration |
-| `GET /api/analytics/retention-cohort` | weekly signup-cohort retention |
-| `GET /api/analytics/recent-events` | latest raw events |
-| `GET /api/meta` | distinct filter values + data date range |
-| `GET /api/analytics` | machine-readable catalogue of all analytics |
-| `GET /api/health` | health check |
-| `POST /api/admin/reseed` | wipe & regenerate sample data |
+| `GET /search/:number` | profile (name, operator, device, IMEI, IMSI, reg date) + call count + total minutes + map points |
+| `GET /graph/:number?depth=1\|2` | contact network (force-graph nodes/links) + shared devices + co-located towers |
+| `GET /timeline/:number?page=&page_size=&from=&to=` | paginated call records with date-range filter |
+| `GET /health` | health check |
 
-Example:
+All queries are **parameterized** (`?` bindings for ClickHouse, `$param` for
+Cypher). A short-TTL Redis cache fronts every result. A pass-through
+**auth middleware stub** guards every route — the seam for warrant checks.
+
+## Quick start
 
 ```bash
-curl "http://localhost:8000/api/analytics/kpis?days=90&country=Germany"
+docker compose up --build
 ```
 
----
+This starts ClickHouse, Memgraph, Redis, the Go API, and the React dashboard,
+then runs the **ingest** job once to generate ~500k synthetic CDRs across ~2000
+subscribers and dual-write them to ClickHouse + Memgraph. First run takes a few
+minutes (image pulls + seeding).
 
-## Configuration
+| Service | URL |
+|---------|-----|
+| Dashboard | http://localhost:3000 |
+| API | http://localhost:8080 |
+| ClickHouse (HTTP) | http://localhost:8123 |
+| Memgraph (Bolt) | bolt://localhost:7687 |
 
-All settings come from environment variables (or a `.env` file — see
-`.env.example`):
+### What number do I search?
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CH_BACKEND` | `embedded` | `embedded` (chdb) or `server` |
-| `CH_HOST` / `CH_PORT` / `CH_USER` / `CH_PASSWORD` | `localhost` / `8123` / `default` / – | server connection |
-| `CHDB_PATH` | `./data/chdb` | on-disk store for embedded mode |
-| `AUTO_SEED` | `true` | seed sample data on startup if empty |
-| `SEED_SESSIONS` / `SEED_USERS` / `SEED_PRODUCTS` / `SEED_DAYS` | `500000` / `50000` / `500` / `90` | dataset size |
-
----
-
-## Verify
-
-Run every analytics query against a small embedded dataset:
+The generator prints a handful of **interesting sample numbers** at the end of
+seeding — copy one into the dashboard search bar:
 
 ```bash
-python scripts/verify.py
+docker compose logs ingest | grep -A12 "SAMPLE NUMBERS"
 ```
 
----
+You'll get well-connected subscribers (rich contact graphs) and a shared-device
+pair (both numbers share one IMEI — good for the shared-device panel).
 
-## Project layout
+### Example API calls
 
+```bash
+# Profile + call count + total minutes + map points
+curl "http://localhost:8080/search/<number>"
+
+# Contact network (depth 1-2) + shared devices + co-located towers
+curl "http://localhost:8080/graph/<number>?depth=2"
+
+# Paginated timeline with a date-range filter
+curl "http://localhost:8080/timeline/<number>?page=1&page_size=50&from=2026-04-01&to=2026-06-18"
 ```
-backend/
-  app/
-    main.py        FastAPI app, startup seeding, static frontend
-    config.py      env-driven settings
-    db.py          pluggable ClickHouse backend (embedded | server)
-    schema.py      table DDL
-    seed.py        in-database sample-data generation
-    queries.py     all optimized analytics SQL
-    routers/analytics.py  one endpoint per analytic
-  Dockerfile
-  requirements.txt
-frontend/
-  index.html, styles.css, app.js, vendor/chart.umd.min.js
-scripts/
-  run_local.sh, verify.py
-docker-compose.yml
+
+### Ad-hoc queries
+
+```bash
+# ClickHouse — busiest towers
+docker compose exec clickhouse clickhouse-client -q \
+  "SELECT location_name, sum(hits) h FROM telecom.cdr_location_rollup GROUP BY location_name ORDER BY h DESC"
+
+# Memgraph — shared-device detection (see ingest/graph_queries.cypher for more)
+echo "MATCH (a:Subscriber)-[:USED]->(d:Device)<-[:USED]-(b:Subscriber)
+      WHERE a.number < b.number
+      RETURN d.imei, collect(a.number)+collect(b.number) LIMIT 10;" \
+  | docker compose exec -T memgraph mgconsole
 ```
+
+### Reseeding
+
+The ingest job is idempotent — it skips if CDRs already exist. To wipe and
+regenerate, set `FORCE_RESEED=true` for the `ingest` service (or
+`docker compose down -v` to drop the ClickHouse volume) and bring it back up.
+
+## Data model
+
+See `clickhouse/schema.sql` (CDR table, rollups, callee projection — documented
+inline) and `ingest/graph_queries.cypher` (graph model + shared-device and
+co-located-tower detection).
+
+## Auth seam (out of scope, stubbed)
+
+Warrant/court authorization is intentionally **not** implemented. Two clean
+seams are left so it slots in later without reshaping anything:
+
+- `api/middleware.go` — a pass-through `authMiddleware` on every route; warrant
+  checks go here.
+- `clickhouse/schema.sql` — an unused `warrant_id String DEFAULT ''` column on
+  the CDR table for later filtering.
