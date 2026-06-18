@@ -172,3 +172,49 @@ func (s *CHStore) Timeline(ctx context.Context, number string, from, to time.Tim
 	}
 	return records, total, rows.Err()
 }
+
+type CoLocatedEvent struct {
+	Number    string `json:"number"`
+	Events    uint64 `json:"events"`
+	FirstSeen string `json:"first_seen"`
+	LastSeen  string `json:"last_seen"`
+}
+
+// CoLocationInTime: other subscribers connected at the SAME cell tower within
+// windowSec of one of the target's connections — a space+time proximity signal
+// (much stronger than "shared a tower ever"). Temporal self-join on cell_id.
+func (s *CHStore) CoLocationInTime(ctx context.Context, number string,
+	windowSec, limit int) ([]CoLocatedEvent, error) {
+
+	rows, err := s.conn.Query(ctx, fmt.Sprintf(`
+		WITH tgt AS (
+			SELECT cell_id, call_start
+			FROM %s.cdr
+			WHERE caller_number = ? OR callee_number = ?
+		)
+		SELECT o.caller_number AS number, count() AS events,
+		       toString(min(o.call_start)) AS first_seen,
+		       toString(max(o.call_start)) AS last_seen
+		FROM %s.cdr AS o
+		INNER JOIN tgt ON o.cell_id = tgt.cell_id
+		WHERE o.caller_number != ?
+		  AND abs(dateDiff('second', o.call_start, tgt.call_start)) <= ?
+		GROUP BY number
+		ORDER BY events DESC
+		LIMIT ?`, s.db, s.db),
+		number, number, number, windowSec, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []CoLocatedEvent{}
+	for rows.Next() {
+		var e CoLocatedEvent
+		if err := rows.Scan(&e.Number, &e.Events, &e.FirstSeen, &e.LastSeen); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}

@@ -96,4 +96,15 @@ body {
 
 .empty { text-align: center; color: var(--text); padding: 40px 0; }
 .muted { color: var(--muted); }
+.small { font-size: 12px; }
 .error { color: #f44336; }
+
+.mini-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.mini-table th { text-align: left; color: var(--muted); border-bottom: 1px solid var(--line); padding: 4px 6px; }
+.mini-table td { padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.filters select { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px; margin-left: 4px; }
+
+.path { margin: 12px 0; line-height: 2; }
+.chip { background: var(--panel-2); border: 1px solid var(--line); border-radius: 14px; padding: 3px 10px; font-family: ui-monospace, monospace; font-size: 12px; }
+.arrow { color: var(--muted); }
+.link-result { margin-top: 12px; }

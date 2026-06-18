@@ -35,6 +35,22 @@ export function useGraph(number, depth = 2) {
   });
 }
 
+export function useColocation(number, windowMin = 10) {
+  return useQuery({
+    queryKey: ["colocation", number, windowMin],
+    queryFn: () => getJSON(`/colocation/${number}?window=${windowMin}`),
+    enabled: !!number,
+  });
+}
+
+export function useLink(a, b) {
+  return useQuery({
+    queryKey: ["link", a, b],
+    queryFn: () => getJSON(`/link/${a}/${b}`),
+    enabled: !!a && !!b,
+  });
+}
+
 export function useTimeline(number, { page, pageSize, from, to }) {
   const params = new URLSearchParams({ page, page_size: pageSize });
   if (from) params.set("from", from);

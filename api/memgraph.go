@@ -34,7 +34,7 @@ func (s *MGStore) close(ctx context.Context) { _ = s.driver.Close(ctx) }
 // --- result types ---
 
 type GraphNode struct {
-	ID   string `json:"id"`   // phone number
+	ID   string `json:"id"` // phone number
 	Name string `json:"name"`
 }
 
@@ -45,8 +45,8 @@ type GraphLink struct {
 }
 
 type SharedDevice struct {
-	IMEI  string `json:"imei"`
-	Model string `json:"model"`
+	IMEI   string `json:"imei"`
+	Model  string `json:"model"`
 	Number string `json:"number"`
 	Name   string `json:"name"`
 }
@@ -179,6 +179,119 @@ func (s *MGStore) Graph(ctx context.Context, number string, depth int) (*GraphRe
 		})
 	}
 	return res, r.Err()
+}
+
+// --- link analysis between two numbers ---
+
+type PathHop struct {
+	Number string `json:"number"`
+	Name   string `json:"name"`
+}
+
+type LinkResult struct {
+	A              string      `json:"a"`
+	B              string      `json:"b"`
+	DirectCalls    int64       `json:"direct_calls"`
+	DirectDuration int64       `json:"direct_duration"`
+	CommonContacts []GraphNode `json:"common_contacts"`
+	SharedTowers   []CoLocated `json:"shared_towers"` // reuse: locations carries the tower name
+	Path           []PathHop   `json:"path"`
+	Hops           int64       `json:"hops"`
+}
+
+// Link reports how two numbers are connected: direct calls, common contacts,
+// shared towers, and the shortest path through the contact network.
+func (s *MGStore) Link(ctx context.Context, a, b string) (*LinkResult, error) {
+	sess := s.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
+	defer sess.Close(ctx)
+
+	res := &LinkResult{A: a, B: b, CommonContacts: []GraphNode{},
+		SharedTowers: []CoLocated{}, Path: []PathHop{}}
+	params := map[string]any{"a": a, "b": b}
+
+	// Direct A<->B calls (edge is aggregated per pair, either direction).
+	r, err := sess.Run(ctx, `
+		MATCH (x:Subscriber {number: $a})-[e:CALLED]-(y:Subscriber {number: $b})
+		RETURN sum(e.calls) AS calls, sum(e.total_duration) AS dur`, params)
+	if err != nil {
+		return nil, err
+	}
+	if r.Next(ctx) {
+		c, _ := r.Record().Get("calls")
+		d, _ := r.Record().Get("dur")
+		res.DirectCalls = asInt64(c)
+		res.DirectDuration = asInt64(d)
+	}
+	if err := r.Err(); err != nil {
+		return nil, err
+	}
+
+	// Common contacts (subscribers both A and B have called).
+	r, err = sess.Run(ctx, `
+		MATCH (a:Subscriber {number: $a})-[:CALLED]-(x:Subscriber)-[:CALLED]-(b:Subscriber {number: $b})
+		WHERE x.number <> $a AND x.number <> $b
+		RETURN DISTINCT x.number AS number, x.name AS name
+		LIMIT 100`, params)
+	if err != nil {
+		return nil, err
+	}
+	for r.Next(ctx) {
+		num, _ := r.Record().Get("number")
+		name, _ := r.Record().Get("name")
+		res.CommonContacts = append(res.CommonContacts, GraphNode{ID: asString(num), Name: asString(name)})
+	}
+	if err := r.Err(); err != nil {
+		return nil, err
+	}
+
+	// Shared towers (both connected at the same cell).
+	r, err = sess.Run(ctx, `
+		MATCH (a:Subscriber {number: $a})-[:CONNECTED_AT]->(c:Cell)<-[:CONNECTED_AT]-(b:Subscriber {number: $b})
+		RETURN DISTINCT c.cell_id AS cell_id, c.location_name AS location
+		LIMIT 100`, params)
+	if err != nil {
+		return nil, err
+	}
+	for r.Next(ctx) {
+		cid, _ := r.Record().Get("cell_id")
+		loc, _ := r.Record().Get("location")
+		res.SharedTowers = append(res.SharedTowers, CoLocated{
+			Number: asString(cid), Locations: []string{asString(loc)},
+		})
+	}
+	if err := r.Err(); err != nil {
+		return nil, err
+	}
+
+	// Shortest path through the contact graph (Memgraph BFS).
+	r, err = sess.Run(ctx, `
+		MATCH p = (a:Subscriber {number: $a})-[:CALLED *BFS]-(b:Subscriber {number: $b})
+		RETURN [n IN nodes(p) | n.number] AS numbers,
+		       [n IN nodes(p) | n.name] AS names,
+		       size(relationships(p)) AS hops
+		LIMIT 1`, params)
+	if err != nil {
+		return nil, err
+	}
+	if r.Next(ctx) {
+		nums := asStringSlice(mustGet(r.Record(), "numbers"))
+		names := asStringSlice(mustGet(r.Record(), "names"))
+		h, _ := r.Record().Get("hops")
+		res.Hops = asInt64(h)
+		for i := range nums {
+			name := ""
+			if i < len(names) {
+				name = names[i]
+			}
+			res.Path = append(res.Path, PathHop{Number: nums[i], Name: name})
+		}
+	}
+	return res, r.Err()
+}
+
+func mustGet(rec *neo4j.Record, key string) any {
+	v, _ := rec.Get(key)
+	return v
 }
 
 // --- small type coercion helpers for Bolt's any-typed values ---

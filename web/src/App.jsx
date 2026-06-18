@@ -4,6 +4,8 @@ import ProfilePanel from "./components/ProfilePanel.jsx";
 import MapPanel from "./components/MapPanel.jsx";
 import GraphPanel from "./components/GraphPanel.jsx";
 import TimelineTable from "./components/TimelineTable.jsx";
+import CoLocationPanel from "./components/CoLocationPanel.jsx";
+import LinkPanel from "./components/LinkPanel.jsx";
 import { useSearch, useGraph } from "./api.js";
 
 export default function App() {
@@ -45,6 +47,8 @@ export default function App() {
           {graph.isLoading && <p className="muted">Loading contact network…</p>}
           {graph.data && <GraphPanel data={graph.data} center={number} />}
 
+          <LinkPanel a={number} />
+          <CoLocationPanel number={number} />
           <TimelineTable number={number} />
         </>
       )}

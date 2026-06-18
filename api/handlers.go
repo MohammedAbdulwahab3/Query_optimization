@@ -140,6 +140,51 @@ func (h *Handlers) Timeline(c *fiber.Ctx) error {
 	})
 }
 
+// GET /link/:a/:b
+func (h *Handlers) Link(c *fiber.Ctx) error {
+	a := c.Params("a")
+	b := c.Params("b")
+	if !validNumber(a) || !validNumber(b) {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid number format")
+	}
+	key := fmt.Sprintf("link:%s:%s", a, b)
+	return h.cached(c, key, func() (any, error) {
+		ctx, cancel := context.WithTimeout(c.UserContext(), 20*time.Second)
+		defer cancel()
+		return h.mg.Link(ctx, a, b)
+	})
+}
+
+// GET /colocation/:number?window=<minutes>
+type CoLocationResponse struct {
+	Number    string           `json:"number"`
+	WindowMin int              `json:"window_minutes"`
+	CoLocated []CoLocatedEvent `json:"co_located"`
+}
+
+func (h *Handlers) CoLocation(c *fiber.Ctx) error {
+	number := c.Params("number")
+	if !validNumber(number) {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid number format")
+	}
+	windowMin := c.QueryInt("window", 10)
+	if windowMin < 1 {
+		windowMin = 1
+	} else if windowMin > 120 {
+		windowMin = 120
+	}
+	key := fmt.Sprintf("colo:%s:%d", number, windowMin)
+	return h.cached(c, key, func() (any, error) {
+		ctx, cancel := context.WithTimeout(c.UserContext(), 20*time.Second)
+		defer cancel()
+		events, err := h.ch.CoLocationInTime(ctx, number, windowMin*60, 50)
+		if err != nil {
+			return nil, err
+		}
+		return CoLocationResponse{Number: number, WindowMin: windowMin, CoLocated: events}, nil
+	})
+}
+
 func parseDate(s string, def time.Time) time.Time {
 	if s == "" {
 		return def
