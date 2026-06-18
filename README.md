@@ -9,6 +9,13 @@ Detail Record) analytics tool** — built as an INSA Ethiopia internal demo.
 > pass-through auth middleware stub on every API route, and an unused
 > `warrant_id` column on the CDR table).
 
+![Analyst dashboard](docs/dashboard.png)
+
+_Dashboard showing a seeded subscriber: profile + stats, call-location map,
+contact network (force graph), shared-device / co-located detection, and the
+virtualized call timeline. (Map base tiles omitted in this capture; tower
+markers shown.)_
+
 ## Architecture
 
 One synthetic ingest stream fans out to two stores; a Go API reads both (with a
