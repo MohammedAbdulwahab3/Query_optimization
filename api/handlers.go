@@ -14,6 +14,7 @@ type Handlers struct {
 	ch    *CHStore
 	mg    *MGStore
 	cache *Cache
+	auth  *Auth
 }
 
 var numberRe = regexp.MustCompile(`^\d{6,15}$`)
@@ -240,6 +241,17 @@ func (h *Handlers) Alerts(c *fiber.Ctx) error {
 		defer cancel()
 		return h.ch.Alerts(ctx, 50)
 	})
+}
+
+// GET /audit — recent analyst access log (not cached; always fresh).
+func (h *Handlers) Audit(c *fiber.Ctx) error {
+	ctx, cancel := context.WithTimeout(c.UserContext(), 15*time.Second)
+	defer cancel()
+	entries, err := h.ch.RecentAudit(ctx, 200)
+	if err != nil {
+		return err
+	}
+	return c.JSON(fiber.Map{"entries": entries})
 }
 
 func parseDate(s string, def time.Time) time.Time {

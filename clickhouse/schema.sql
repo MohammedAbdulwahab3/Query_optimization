@@ -153,3 +153,40 @@ SELECT
     count()       AS hits
 FROM telecom.cdr
 GROUP BY number, cell_id, latitude, longitude, location_name;
+
+
+-- ----------------------------------------------------------------------------
+-- 4. Auth layer: warrants + audit log
+-- ----------------------------------------------------------------------------
+-- Lawful-interception governance. The API enforces that every access to a
+-- specific number is covered by an ACTIVE warrant, and records every access
+-- (allowed or denied) in the audit log. (The cdr.warrant_id seam remains for
+-- future per-record tagging; authorization is driven by this warrants table.)
+
+CREATE TABLE IF NOT EXISTS telecom.warrants
+(
+    warrant_id    String,
+    target_number String,
+    analyst       String,
+    reason        String,
+    valid_from    DateTime,
+    valid_to      DateTime,
+    created_at    DateTime DEFAULT now()
+)
+ENGINE = MergeTree
+ORDER BY (target_number, warrant_id);
+
+-- Append-only audit trail of analyst access. Who looked at what, when, under
+-- which warrant, and whether it was allowed.
+CREATE TABLE IF NOT EXISTS telecom.audit_log
+(
+    ts         DateTime DEFAULT now(),
+    analyst    String,
+    action     String,
+    target     String,
+    warrant_id String,
+    result     LowCardinality(String),  -- allowed | denied
+    client_ip  String
+)
+ENGINE = MergeTree
+ORDER BY ts;

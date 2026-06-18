@@ -5,6 +5,7 @@ go 1.24
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.30.0
 	github.com/gofiber/fiber/v2 v2.52.5
+	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/neo4j/neo4j-go-driver/v5 v5.25.0
 	github.com/redis/go-redis/v9 v9.7.0
 )

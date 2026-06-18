@@ -104,6 +104,16 @@ body {
 .mini-table td { padding: 4px 6px; border-bottom: 1px solid var(--line); }
 .filters select { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px; margin-left: 4px; }
 
+.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+.login-card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 32px; width: 360px; display: flex; flex-direction: column; gap: 12px; }
+.login-card h1 { font-size: 20px; margin: 0; }
+.login-card input { padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); }
+.login-card button { padding: 10px; border-radius: 8px; border: none; background: var(--accent); color: #fff; font-weight: 600; cursor: pointer; }
+
+.warrant-deny { border-left: 4px solid #f44336; }
+.warrant-deny h3 { color: #f44336; margin-top: 0; }
+.logout { background: transparent !important; border-color: var(--line) !important; }
+
 .tabs { margin-left: auto; display: flex; gap: 6px; }
 .tabs button { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 14px; cursor: pointer; }
 .tabs button.active { background: var(--accent); border-color: var(--accent); }

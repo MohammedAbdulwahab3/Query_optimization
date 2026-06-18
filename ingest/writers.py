@@ -56,6 +56,23 @@ class ClickHouseWriter:
             database=self.database,
         )
 
+    def warrant_count(self) -> int:
+        try:
+            r = self.client.query(f"SELECT count() FROM {self.database}.warrants")
+            return int(r.result_rows[0][0])
+        except Exception:  # noqa: BLE001
+            return 0
+
+    def insert_warrants(self, rows: list[tuple]) -> None:
+        # columns: warrant_id, target_number, analyst, reason, valid_from, valid_to
+        self.client.insert(
+            table="warrants",
+            data=rows,
+            column_names=["warrant_id", "target_number", "analyst", "reason",
+                          "valid_from", "valid_to"],
+            database=self.database,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Memgraph (Bolt-compatible — use the neo4j driver)

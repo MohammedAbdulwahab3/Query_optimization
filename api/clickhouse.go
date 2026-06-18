@@ -180,6 +180,60 @@ type CoLocatedEvent struct {
 	LastSeen  string `json:"last_seen"`
 }
 
+// --- auth: warrants + audit log ---
+
+// ActiveWarrant returns the id of an active warrant covering number, or "".
+func (s *CHStore) ActiveWarrant(ctx context.Context, number string) (string, error) {
+	var id string
+	row := s.conn.QueryRow(ctx, fmt.Sprintf(`
+		SELECT warrant_id FROM %s.warrants
+		WHERE target_number = ? AND valid_from <= now() AND valid_to >= now()
+		ORDER BY valid_to DESC LIMIT 1`, s.db), number)
+	if err := row.Scan(&id); err != nil {
+		return "", nil // no row -> no active warrant (not an error)
+	}
+	return id, nil
+}
+
+// WriteAudit appends an access record (best-effort; never blocks the request).
+func (s *CHStore) WriteAudit(ctx context.Context, analyst, action, target, warrantID, result, ip string) {
+	_ = s.conn.Exec(ctx, fmt.Sprintf(`
+		INSERT INTO %s.audit_log (analyst, action, target, warrant_id, result, client_ip)
+		VALUES (?, ?, ?, ?, ?, ?)`, s.db),
+		analyst, action, target, warrantID, result, ip)
+}
+
+type AuditEntry struct {
+	Ts        string `json:"ts"`
+	Analyst   string `json:"analyst"`
+	Action    string `json:"action"`
+	Target    string `json:"target"`
+	WarrantID string `json:"warrant_id"`
+	Result    string `json:"result"`
+	ClientIP  string `json:"client_ip"`
+}
+
+// RecentAudit returns the latest audit entries (for the audit view).
+func (s *CHStore) RecentAudit(ctx context.Context, limit int) ([]AuditEntry, error) {
+	rows, err := s.conn.Query(ctx, fmt.Sprintf(`
+		SELECT toString(ts), analyst, action, target, warrant_id, result, client_ip
+		FROM %s.audit_log ORDER BY ts DESC LIMIT ?`, s.db), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []AuditEntry{}
+	for rows.Next() {
+		var e AuditEntry
+		if err := rows.Scan(&e.Ts, &e.Analyst, &e.Action, &e.Target, &e.WarrantID,
+			&e.Result, &e.ClientIP); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 // --- pattern-of-life + trajectory ---
 
 type HeatCell struct {

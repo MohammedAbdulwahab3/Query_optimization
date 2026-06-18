@@ -143,13 +143,59 @@ def main() -> None:
     _batched(mg.merge_called, list(called.values()), 5000, "CALLED edges")
     _batched(mg.merge_connected_at, list(connected.values()), 5000, "CONNECTED_AT edges")
 
+    # --- seed warrants for the investigative targets so the demo works with
+    # auth enabled (other numbers will be denied — demonstrating the control) ---
+    _seed_warrants(ch, subscribers, called)
+
     # --- verify ---
     print("\n[verify] ClickHouse CDR count:", f"{ch.cdr_count():,}")
     print("[verify] Memgraph graph counts:", mg.counts())
+    print("[verify] warrants seeded:", ch.warrant_count())
     mg.close()
 
     _print_sample_numbers(subscribers, called)
     print("[ingest] done.")
+
+
+def _seed_warrants(ch, subscribers, called) -> None:
+    """Issue warrants covering the interesting targets: well-connected numbers,
+    burners, night owls, and shared-device groups."""
+    from collections import defaultdict
+
+    if ch.warrant_count() > 0:
+        print("[ingest] warrants already present; skipping warrant seed.")
+        return
+
+    degree: dict[str, int] = defaultdict(int)
+    for (a, b) in called:
+        degree[a] += 1
+        degree[b] += 1
+    imei_subs: dict[str, list] = defaultdict(list)
+    for s in subscribers:
+        imei_subs[s.device.imei].append(s)
+
+    targets: dict[str, str] = {}  # number -> reason
+    for s in sorted(subscribers, key=lambda s: degree.get(s.number, 0), reverse=True)[:10]:
+        targets[s.number] = "High-volume contact network (intelligence priority)"
+    for s in subscribers:
+        if s.behavior == "burner":
+            targets[s.number] = "Suspected burner handset"
+        elif s.behavior == "night":
+            targets.setdefault(s.number, "Anomalous late-night activity")
+    for grp in imei_subs.values():
+        if len(grp) > 1:
+            for s in grp:
+                targets.setdefault(s.number, "Shared device / possible SIM-swap")
+
+    base = datetime(2026, 6, 18)
+    rows = []
+    for i, (num, reason) in enumerate(targets.items(), start=1):
+        rows.append((
+            f"W-{i:05d}", num, "agent.alem", reason,
+            base - timedelta(days=30), base + timedelta(days=90),
+        ))
+    ch.insert_warrants(rows)
+    print(f"[ingest] seeded {len(rows)} warrants for investigative targets.")
 
 
 def _print_sample_numbers(subscribers, called) -> None:
@@ -182,6 +228,9 @@ def _print_sample_numbers(subscribers, called) -> None:
         grp = max(shared, key=lambda g: sum(degree.get(x.number, 0) for x in g))
         for s in grp:
             print(f"   {s.number}  {s.name:<22} {s.operator:<14} IMEI {s.device.imei}")
+    print("-" * 64)
+    print(" Analyst login (auth is ON): agent.alem / insa-demo")
+    print(" These targets have active warrants; other numbers return 403.")
     print("=" * 64 + "\n")
 
 
