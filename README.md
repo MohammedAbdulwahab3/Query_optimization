@@ -40,10 +40,23 @@ Redis cache) and serves a React analyst dashboard.
 Built incrementally; each layer verified before the next.
 
 - [x] **ClickHouse schema + rollups** (`clickhouse/schema.sql`) — verified
-- [ ] Ingest (synthetic generator, dual-write)
-- [ ] Go Fiber API
+- [x] **Ingest** — synthetic generator, dual-write (`ingest/`) — verified
+- [x] **Go Fiber API** — `/search` `/graph` `/timeline`, Redis cache, auth stub (`api/`) — verified
 - [ ] React dashboard
 - [ ] docker-compose wiring + run instructions
+
+### API endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /search/:number` | profile (name, operator, device, IMEI, IMSI, reg date) + call count + total minutes + map points |
+| `GET /graph/:number?depth=1\|2` | contact network (force-graph nodes/links) + shared devices + co-located towers |
+| `GET /timeline/:number?page=&page_size=&from=&to=` | paginated call records with date-range filter |
+| `GET /health` | health check |
+
+All queries are **parameterized** (`?` bindings for ClickHouse, `$param` for
+Cypher). A short-TTL Redis cache fronts every result. A pass-through
+**auth middleware stub** guards every route — the seam for warrant checks.
 
 ## Quick start
 

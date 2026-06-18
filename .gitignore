@@ -31,3 +31,6 @@ data/
 # Misc
 *.log
 .pytest_cache/
+
+# Go API compiled binary
+api/telecom-cdr-api

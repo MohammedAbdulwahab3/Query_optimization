@@ -218,10 +218,6 @@ def build_subscribers(
     return subs
 
 
-def _jittered_point(rng: random.Random, lat: float, lon: float) -> tuple[float, float]:
-    return round(lat + rng.uniform(-0.02, 0.02), 6), round(lon + rng.uniform(-0.02, 0.02), 6)
-
-
 def generate_cdrs(
     rng: random.Random,
     fake: Faker,
@@ -272,10 +268,13 @@ def generate_cdrs(
         call_end = call_start + timedelta(seconds=duration)
 
         # Location: usually the caller's home city; ~8% roaming to another city.
+        # The call connects at a fixed cell tower, so the CDR carries that
+        # tower's coordinates — this keeps the location rollup genuinely
+        # pre-aggregated (one row per number per tower, not per call).
         roaming = rng.random() < 0.08
         city = rng.choice(CITIES)[0] if roaming else caller.home_city
         cell = rng.choice(cells_by_city.get(city, cells))
-        lat, lon = _jittered_point(rng, cell.latitude, cell.longitude)
+        lat, lon = cell.latitude, cell.longitude
 
         data_volume = round(rng.uniform(0.1, 500.0), 2) if call_type == "data" else 0.0
 
