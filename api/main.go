@@ -52,6 +52,8 @@ func buildApp(h *Handlers) *fiber.App {
 	api.Get("/link/:a/:b", h.Link)
 	api.Get("/flags/:number", h.Flags)
 	api.Get("/alerts", h.Alerts)
+	api.Get("/patterns/:number", h.Patterns)
+	api.Get("/trajectory/:number", h.Trajectory)
 	return app
 }
 

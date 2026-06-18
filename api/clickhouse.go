@@ -180,6 +180,117 @@ type CoLocatedEvent struct {
 	LastSeen  string `json:"last_seen"`
 }
 
+// --- pattern-of-life + trajectory ---
+
+type HeatCell struct {
+	Dow   uint8  `json:"dow"` // 1=Mon … 7=Sun
+	Hour  uint8  `json:"hour"`
+	Calls uint64 `json:"calls"`
+}
+
+type TowerRef struct {
+	LocationName string  `json:"location_name"`
+	CellID       string  `json:"cell_id"`
+	Latitude     float64 `json:"latitude"`
+	Longitude    float64 `json:"longitude"`
+	Count        uint64  `json:"count"`
+}
+
+type PatternsResult struct {
+	Number  string     `json:"number"`
+	Heatmap []HeatCell `json:"heatmap"`
+	Home    *TowerRef  `json:"home"`
+	Work    *TowerRef  `json:"work"`
+}
+
+// Patterns returns a day-of-week × hour call heatmap plus inferred home tower
+// (most-used at night, 20:00–06:00) and work tower (most-used weekday daytime).
+func (s *CHStore) Patterns(ctx context.Context, number string) (*PatternsResult, error) {
+	res := &PatternsResult{Number: number, Heatmap: []HeatCell{}}
+
+	rows, err := s.conn.Query(ctx, fmt.Sprintf(`
+		WITH ev AS (
+			SELECT call_start FROM %s.cdr
+			WHERE caller_number = ? OR callee_number = ?
+		)
+		SELECT toDayOfWeek(call_start) AS dow, toHour(call_start) AS hour, count() AS calls
+		FROM ev GROUP BY dow, hour ORDER BY dow, hour`, s.db), number, number)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var h HeatCell
+		if err := rows.Scan(&h.Dow, &h.Hour, &h.Calls); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		res.Heatmap = append(res.Heatmap, h)
+	}
+	rows.Close()
+
+	res.Home = s.topTower(ctx, number,
+		"(toHour(call_start) >= 20 OR toHour(call_start) < 6)")
+	res.Work = s.topTower(ctx, number,
+		"toHour(call_start) BETWEEN 9 AND 17 AND toDayOfWeek(call_start) <= 5")
+	return res, nil
+}
+
+// topTower returns the most-used tower for a number under a time predicate, or
+// nil if there are no matching connections.
+func (s *CHStore) topTower(ctx context.Context, number, timePred string) *TowerRef {
+	t := &TowerRef{}
+	row := s.conn.QueryRow(ctx, fmt.Sprintf(`
+		SELECT location_name, cell_id, latitude, longitude, count() AS c
+		FROM %s.cdr
+		WHERE (caller_number = ? OR callee_number = ?) AND %s
+		GROUP BY location_name, cell_id, latitude, longitude
+		ORDER BY c DESC LIMIT 1`, s.db, timePred), number, number)
+	if err := row.Scan(&t.LocationName, &t.CellID, &t.Latitude, &t.Longitude, &t.Count); err != nil {
+		return nil
+	}
+	return t
+}
+
+type TrajPoint struct {
+	Time         string  `json:"time"`
+	Latitude     float64 `json:"latitude"`
+	Longitude    float64 `json:"longitude"`
+	LocationName string  `json:"location_name"`
+	CellID       string  `json:"cell_id"`
+}
+
+type TrajectoryResult struct {
+	Number string      `json:"number"`
+	Points []TrajPoint `json:"points"`
+}
+
+// Trajectory returns a number's tower connections in chronological order for
+// movement playback on the map.
+func (s *CHStore) Trajectory(ctx context.Context, number string, from, to time.Time,
+	limit int) (*TrajectoryResult, error) {
+
+	res := &TrajectoryResult{Number: number, Points: []TrajPoint{}}
+	rows, err := s.conn.Query(ctx, fmt.Sprintf(`
+		SELECT toString(call_start), latitude, longitude, location_name, cell_id
+		FROM %s.cdr
+		WHERE (caller_number = ? OR callee_number = ?)
+		  AND call_start >= ? AND call_start < ?
+		ORDER BY call_start ASC
+		LIMIT ?`, s.db), number, number, from, to, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var p TrajPoint
+		if err := rows.Scan(&p.Time, &p.Latitude, &p.Longitude, &p.LocationName, &p.CellID); err != nil {
+			return nil, err
+		}
+		res.Points = append(res.Points, p)
+	}
+	return res, rows.Err()
+}
+
 // --- suspicious-pattern detection ---
 
 type Flag struct {

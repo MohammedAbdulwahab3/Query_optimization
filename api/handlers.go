@@ -185,6 +185,41 @@ func (h *Handlers) CoLocation(c *fiber.Ctx) error {
 	})
 }
 
+// GET /patterns/:number
+func (h *Handlers) Patterns(c *fiber.Ctx) error {
+	number := c.Params("number")
+	if !validNumber(number) {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid number format")
+	}
+	return h.cached(c, "patterns:"+number, func() (any, error) {
+		ctx, cancel := context.WithTimeout(c.UserContext(), 15*time.Second)
+		defer cancel()
+		return h.ch.Patterns(ctx, number)
+	})
+}
+
+// GET /trajectory/:number?from=&to=&limit=
+func (h *Handlers) Trajectory(c *fiber.Ctx) error {
+	number := c.Params("number")
+	if !validNumber(number) {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid number format")
+	}
+	from := parseDate(c.Query("from"), time.Now().AddDate(-10, 0, 0))
+	to := parseDate(c.Query("to"), time.Now().AddDate(0, 0, 1))
+	limit := c.QueryInt("limit", 500)
+	if limit < 1 {
+		limit = 500
+	} else if limit > 2000 {
+		limit = 2000
+	}
+	key := fmt.Sprintf("traj:%s:%d:%d:%d", number, from.Unix(), to.Unix(), limit)
+	return h.cached(c, key, func() (any, error) {
+		ctx, cancel := context.WithTimeout(c.UserContext(), 15*time.Second)
+		defer cancel()
+		return h.ch.Trajectory(ctx, number, from, to, limit)
+	})
+}
+
 // GET /flags/:number
 func (h *Handlers) Flags(c *fiber.Ctx) error {
 	number := c.Params("number")

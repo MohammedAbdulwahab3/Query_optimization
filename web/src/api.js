@@ -35,6 +35,22 @@ export function useGraph(number, depth = 2) {
   });
 }
 
+export function usePatterns(number) {
+  return useQuery({
+    queryKey: ["patterns", number],
+    queryFn: () => getJSON(`/patterns/${number}`),
+    enabled: !!number,
+  });
+}
+
+export function useTrajectory(number) {
+  return useQuery({
+    queryKey: ["trajectory", number],
+    queryFn: () => getJSON(`/trajectory/${number}?limit=500`),
+    enabled: !!number,
+  });
+}
+
 export function useFlags(number) {
   return useQuery({
     queryKey: ["flags", number],

@@ -7,6 +7,8 @@ import TimelineTable from "./components/TimelineTable.jsx";
 import CoLocationPanel from "./components/CoLocationPanel.jsx";
 import LinkPanel from "./components/LinkPanel.jsx";
 import FlagsPanel from "./components/FlagsPanel.jsx";
+import PatternsPanel from "./components/PatternsPanel.jsx";
+import TrajectoryPanel from "./components/TrajectoryPanel.jsx";
 import AlertsView from "./components/AlertsView.jsx";
 import { useSearch, useGraph } from "./api.js";
 
@@ -61,10 +63,12 @@ export default function App() {
               </div>
 
               <FlagsPanel number={number} />
+              <PatternsPanel number={number} />
 
               {graph.isLoading && <p className="muted">Loading contact network…</p>}
               {graph.data && <GraphPanel data={graph.data} center={number} />}
 
+              <TrajectoryPanel number={number} />
               <LinkPanel a={number} />
               <CoLocationPanel number={number} />
               <TimelineTable number={number} />

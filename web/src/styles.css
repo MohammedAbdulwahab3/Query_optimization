@@ -122,6 +122,19 @@ body {
 .linkbtn { background: none; border: none; color: var(--accent); cursor: pointer; font-family: ui-monospace, monospace; font-size: 12px; padding: 0; }
 .linkbtn:hover { text-decoration: underline; }
 
+.heatmap { display: flex; flex-direction: column; gap: 2px; overflow-x: auto; }
+.hm-row { display: flex; gap: 2px; align-items: center; }
+.hm-label { width: 34px; font-size: 11px; color: var(--muted); flex: 0 0 34px; }
+.hm-hour { width: 14px; font-size: 9px; color: var(--muted); text-align: center; flex: 0 0 14px; }
+.hm-cell { width: 14px; height: 14px; border-radius: 2px; flex: 0 0 14px; }
+.towers { display: flex; gap: 16px; margin-top: 14px; flex-wrap: wrap; }
+.tower-card { background: var(--panel-2); border-radius: 8px; padding: 10px 14px; font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+.tower-kind { color: var(--muted); font-size: 12px; }
+
+.playbar { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+.playbar input[type="range"] { flex: 1; }
+.playbar button { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--line); background: var(--accent); color: #fff; cursor: pointer; }
+
 .path { margin: 12px 0; line-height: 2; }
 .chip { background: var(--panel-2); border: 1px solid var(--line); border-radius: 14px; padding: 3px 10px; font-family: ui-monospace, monospace; font-size: 12px; }
 .arrow { color: var(--muted); }
