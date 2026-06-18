@@ -42,7 +42,7 @@ Built incrementally; each layer verified before the next.
 - [x] **ClickHouse schema + rollups** (`clickhouse/schema.sql`) — verified
 - [x] **Ingest** — synthetic generator, dual-write (`ingest/`) — verified
 - [x] **Go Fiber API** — `/search` `/graph` `/timeline`, Redis cache, auth stub (`api/`) — verified
-- [ ] React dashboard
+- [x] **React dashboard** — search, profile, Leaflet map, force-graph, virtualized timeline (`web/`) — builds
 - [ ] docker-compose wiring + run instructions
 
 ### API endpoints
