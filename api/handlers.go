@@ -185,6 +185,28 @@ func (h *Handlers) CoLocation(c *fiber.Ctx) error {
 	})
 }
 
+// GET /flags/:number
+func (h *Handlers) Flags(c *fiber.Ctx) error {
+	number := c.Params("number")
+	if !validNumber(number) {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid number format")
+	}
+	return h.cached(c, "flags:"+number, func() (any, error) {
+		ctx, cancel := context.WithTimeout(c.UserContext(), 15*time.Second)
+		defer cancel()
+		return h.ch.Flags(ctx, number)
+	})
+}
+
+// GET /alerts
+func (h *Handlers) Alerts(c *fiber.Ctx) error {
+	return h.cached(c, "alerts", func() (any, error) {
+		ctx, cancel := context.WithTimeout(c.UserContext(), 30*time.Second)
+		defer cancel()
+		return h.ch.Alerts(ctx, 50)
+	})
+}
+
 func parseDate(s string, def time.Time) time.Time {
 	if s == "" {
 		return def

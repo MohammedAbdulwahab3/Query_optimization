@@ -50,6 +50,8 @@ func buildApp(h *Handlers) *fiber.App {
 	api.Get("/timeline/:number", h.Timeline)
 	api.Get("/colocation/:number", h.CoLocation)
 	api.Get("/link/:a/:b", h.Link)
+	api.Get("/flags/:number", h.Flags)
+	api.Get("/alerts", h.Alerts)
 	return app
 }
 

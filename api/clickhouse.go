@@ -180,6 +180,187 @@ type CoLocatedEvent struct {
 	LastSeen  string `json:"last_seen"`
 }
 
+// --- suspicious-pattern detection ---
+
+type Flag struct {
+	Code     string `json:"code"`
+	Label    string `json:"label"`
+	Severity string `json:"severity"` // low | medium | high
+	Detail   string `json:"detail"`
+}
+
+type FlagsResult struct {
+	Number     string   `json:"number"`
+	TotalCalls uint64   `json:"total_calls"`
+	Contacts   uint64   `json:"contacts"`
+	ActiveDays uint64   `json:"active_days"`
+	OutRatio   float64  `json:"out_ratio"`
+	NightRatio float64  `json:"night_ratio"`
+	FirstSeen  string   `json:"first_seen"`
+	LastSeen   string   `json:"last_seen"`
+	SharedIMEI []string `json:"shared_imei_numbers"`
+	Flags      []Flag   `json:"flags"`
+}
+
+// Flags computes behavioral metrics for a number and derives suspicious-pattern
+// flags (shared device / SIM-swap, possible burner, high night activity,
+// mostly-outgoing). Activity counts the number as A- or B-party.
+func (s *CHStore) Flags(ctx context.Context, number string) (*FlagsResult, error) {
+	res := &FlagsResult{Number: number, SharedIMEI: []string{}, Flags: []Flag{}}
+
+	row := s.conn.QueryRow(ctx, fmt.Sprintf(`
+		WITH ev AS (
+			SELECT call_start, (caller_number = ?) AS is_out,
+			       if(caller_number = ?, callee_number, caller_number) AS other
+			FROM %s.cdr WHERE caller_number = ? OR callee_number = ?
+		)
+		SELECT count() AS total, uniq(other) AS contacts,
+		       uniq(toDate(call_start)) AS active_days,
+		       if(count() = 0, 0, countIf(is_out) / count()) AS out_ratio,
+		       if(count() = 0, 0, countIf(toHour(call_start) < 5) / count()) AS night_ratio,
+		       toString(min(call_start)) AS first_seen,
+		       toString(max(call_start)) AS last_seen
+		FROM ev`, s.db),
+		number, number, number, number)
+	if err := row.Scan(&res.TotalCalls, &res.Contacts, &res.ActiveDays,
+		&res.OutRatio, &res.NightRatio, &res.FirstSeen, &res.LastSeen); err != nil {
+		return nil, err
+	}
+
+	if err := s.conn.QueryRow(ctx, fmt.Sprintf(`
+		SELECT groupUniqArray(caller_number)
+		FROM %s.cdr
+		WHERE imei = (SELECT any(imei) FROM %s.cdr WHERE caller_number = ?)
+		  AND caller_number != ?`, s.db, s.db),
+		number, number).Scan(&res.SharedIMEI); err != nil {
+		return nil, err
+	}
+
+	// derive flags
+	if len(res.SharedIMEI) > 0 {
+		res.Flags = append(res.Flags, Flag{
+			Code: "shared_device", Label: "Shared device (possible SIM-swap)",
+			Severity: "high",
+			Detail:   fmt.Sprintf("IMEI also used by %d other number(s)", len(res.SharedIMEI)),
+		})
+	}
+	if res.Contacts <= 3 && res.ActiveDays <= 10 && res.TotalCalls > 0 && res.TotalCalls <= 30 {
+		res.Flags = append(res.Flags, Flag{
+			Code: "burner", Label: "Possible burner phone", Severity: "high",
+			Detail: fmt.Sprintf("%d calls, %d contacts, active %d day(s)",
+				res.TotalCalls, res.Contacts, res.ActiveDays),
+		})
+	}
+	if res.NightRatio >= 0.4 && res.TotalCalls >= 10 {
+		res.Flags = append(res.Flags, Flag{
+			Code: "night_activity", Label: "High late-night activity", Severity: "medium",
+			Detail: fmt.Sprintf("%.0f%% of calls between 00:00–05:00", res.NightRatio*100),
+		})
+	}
+	if res.OutRatio >= 0.85 && res.TotalCalls >= 10 {
+		res.Flags = append(res.Flags, Flag{
+			Code: "mostly_outgoing", Label: "Almost exclusively outgoing", Severity: "low",
+			Detail: fmt.Sprintf("%.0f%% outgoing", res.OutRatio*100),
+		})
+	}
+	return res, nil
+}
+
+type SimSwapGroup struct {
+	IMEI    string   `json:"imei"`
+	Count   uint64   `json:"count"`
+	Numbers []string `json:"numbers"`
+}
+
+type BurnerAlert struct {
+	Number     string `json:"number"`
+	Calls      uint64 `json:"calls"`
+	Contacts   uint64 `json:"contacts"`
+	ActiveDays uint64 `json:"active_days"`
+}
+
+type NightOwlAlert struct {
+	Number     string  `json:"number"`
+	Calls      uint64  `json:"calls"`
+	NightRatio float64 `json:"night_ratio"`
+}
+
+type AlertsResult struct {
+	SimSwap   []SimSwapGroup  `json:"sim_swap"`
+	Burners   []BurnerAlert   `json:"burners"`
+	NightOwls []NightOwlAlert `json:"night_owls"`
+}
+
+// Alerts runs dataset-wide suspicious-pattern detection.
+func (s *CHStore) Alerts(ctx context.Context, limit int) (*AlertsResult, error) {
+	res := &AlertsResult{SimSwap: []SimSwapGroup{}, Burners: []BurnerAlert{}, NightOwls: []NightOwlAlert{}}
+
+	rows, err := s.conn.Query(ctx, fmt.Sprintf(`
+		SELECT imei, length(groupUniqArray(caller_number)) AS cnt,
+		       groupUniqArray(caller_number) AS nums
+		FROM %s.cdr GROUP BY imei HAVING cnt > 1 ORDER BY cnt DESC LIMIT ?`, s.db), limit)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var g SimSwapGroup
+		if err := rows.Scan(&g.IMEI, &g.Count, &g.Numbers); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		res.SimSwap = append(res.SimSwap, g)
+	}
+	rows.Close()
+
+	rows, err = s.conn.Query(ctx, fmt.Sprintf(`
+		WITH ev AS (
+			SELECT caller_number AS n, call_start, callee_number AS other FROM %s.cdr
+			UNION ALL
+			SELECT callee_number AS n, call_start, caller_number AS other FROM %s.cdr)
+		SELECT n AS number, count() AS calls, uniq(other) AS contacts,
+		       uniq(toDate(call_start)) AS active_days
+		FROM ev GROUP BY n
+		HAVING contacts <= 3 AND active_days <= 10 AND calls <= 30
+		ORDER BY calls DESC LIMIT ?`, s.db, s.db), limit)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var b BurnerAlert
+		if err := rows.Scan(&b.Number, &b.Calls, &b.Contacts, &b.ActiveDays); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		res.Burners = append(res.Burners, b)
+	}
+	rows.Close()
+
+	rows, err = s.conn.Query(ctx, fmt.Sprintf(`
+		WITH ev AS (
+			SELECT caller_number AS n, call_start FROM %s.cdr
+			UNION ALL
+			SELECT callee_number AS n, call_start FROM %s.cdr)
+		SELECT n AS number, count() AS calls,
+		       countIf(toHour(call_start) < 5) / count() AS night_ratio
+		FROM ev GROUP BY n
+		HAVING calls >= 10 AND night_ratio >= 0.4
+		ORDER BY night_ratio DESC LIMIT ?`, s.db, s.db), limit)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var o NightOwlAlert
+		if err := rows.Scan(&o.Number, &o.Calls, &o.NightRatio); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		res.NightOwls = append(res.NightOwls, o)
+	}
+	rows.Close()
+
+	return res, nil
+}
+
 // CoLocationInTime: other subscribers connected at the SAME cell tower within
 // windowSec of one of the target's connections — a space+time proximity signal
 // (much stronger than "shared a tower ever"). Temporal self-join on cell_id.

@@ -35,6 +35,22 @@ export function useGraph(number, depth = 2) {
   });
 }
 
+export function useFlags(number) {
+  return useQuery({
+    queryKey: ["flags", number],
+    queryFn: () => getJSON(`/flags/${number}`),
+    enabled: !!number,
+  });
+}
+
+export function useAlerts(enabled) {
+  return useQuery({
+    queryKey: ["alerts"],
+    queryFn: () => getJSON(`/alerts`),
+    enabled: !!enabled,
+  });
+}
+
 export function useColocation(number, windowMin = 10) {
   return useQuery({
     queryKey: ["colocation", number, windowMin],
