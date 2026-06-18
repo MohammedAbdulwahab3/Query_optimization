@@ -147,7 +147,42 @@ def main() -> None:
     print("\n[verify] ClickHouse CDR count:", f"{ch.cdr_count():,}")
     print("[verify] Memgraph graph counts:", mg.counts())
     mg.close()
+
+    _print_sample_numbers(subscribers, called)
     print("[ingest] done.")
+
+
+def _print_sample_numbers(subscribers, called) -> None:
+    """Surface a few interesting numbers to search in the dashboard."""
+    from collections import defaultdict
+
+    # degree = how many distinct contacts a number has (good force-graphs)
+    degree: dict[str, int] = defaultdict(int)
+    for (a, b) in called:
+        degree[a] += 1
+        degree[b] += 1
+
+    # numbers that share a handset (good for shared-device detection)
+    imei_subs: dict[str, list] = defaultdict(list)
+    for s in subscribers:
+        imei_subs[s.device.imei].append(s)
+    shared = [grp for grp in imei_subs.values() if len(grp) > 1]
+
+    print("\n" + "=" * 64)
+    print(" SAMPLE NUMBERS TO SEARCH IN THE DASHBOARD (http://localhost:3000)")
+    print("=" * 64)
+
+    top = sorted(subscribers, key=lambda s: degree.get(s.number, 0), reverse=True)[:5]
+    print(" Well-connected subscribers (rich contact network):")
+    for s in top:
+        print(f"   {s.number}  {s.name:<22} {s.operator:<14} contacts≈{degree.get(s.number,0)}")
+
+    if shared:
+        print(" Shared-device pair (try either — they share one IMEI):")
+        grp = max(shared, key=lambda g: sum(degree.get(x.number, 0) for x in g))
+        for s in grp:
+            print(f"   {s.number}  {s.name:<22} {s.operator:<14} IMEI {s.device.imei}")
+    print("=" * 64 + "\n")
 
 
 def _batched(fn, rows: list[dict], size: int, label: str) -> None:

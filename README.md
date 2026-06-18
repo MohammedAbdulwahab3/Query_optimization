@@ -43,7 +43,7 @@ Built incrementally; each layer verified before the next.
 - [x] **Ingest** — synthetic generator, dual-write (`ingest/`) — verified
 - [x] **Go Fiber API** — `/search` `/graph` `/timeline`, Redis cache, auth stub (`api/`) — verified
 - [x] **React dashboard** — search, profile, Leaflet map, force-graph, virtualized timeline (`web/`) — builds
-- [ ] docker-compose wiring + run instructions
+- [x] **docker-compose wiring** + run instructions
 
 ### API endpoints
 
@@ -60,8 +60,79 @@ Cypher). A short-TTL Redis cache fronts every result. A pass-through
 
 ## Quick start
 
-> _Coming as the stack is wired up._ The goal: `docker compose up` brings up
-> clickhouse, memgraph, redis, api, web, and the ingest job seeds ~500k
-> synthetic calls across ~2000 subscribers on startup.
+```bash
+docker compose up --build
+```
 
-See `clickhouse/schema.sql` for the data model (documented inline).
+This starts ClickHouse, Memgraph, Redis, the Go API, and the React dashboard,
+then runs the **ingest** job once to generate ~500k synthetic CDRs across ~2000
+subscribers and dual-write them to ClickHouse + Memgraph. First run takes a few
+minutes (image pulls + seeding).
+
+| Service | URL |
+|---------|-----|
+| Dashboard | http://localhost:3000 |
+| API | http://localhost:8080 |
+| ClickHouse (HTTP) | http://localhost:8123 |
+| Memgraph (Bolt) | bolt://localhost:7687 |
+
+### What number do I search?
+
+The generator prints a handful of **interesting sample numbers** at the end of
+seeding — copy one into the dashboard search bar:
+
+```bash
+docker compose logs ingest | grep -A12 "SAMPLE NUMBERS"
+```
+
+You'll get well-connected subscribers (rich contact graphs) and a shared-device
+pair (both numbers share one IMEI — good for the shared-device panel).
+
+### Example API calls
+
+```bash
+# Profile + call count + total minutes + map points
+curl "http://localhost:8080/search/<number>"
+
+# Contact network (depth 1-2) + shared devices + co-located towers
+curl "http://localhost:8080/graph/<number>?depth=2"
+
+# Paginated timeline with a date-range filter
+curl "http://localhost:8080/timeline/<number>?page=1&page_size=50&from=2026-04-01&to=2026-06-18"
+```
+
+### Ad-hoc queries
+
+```bash
+# ClickHouse — busiest towers
+docker compose exec clickhouse clickhouse-client -q \
+  "SELECT location_name, sum(hits) h FROM telecom.cdr_location_rollup GROUP BY location_name ORDER BY h DESC"
+
+# Memgraph — shared-device detection (see ingest/graph_queries.cypher for more)
+echo "MATCH (a:Subscriber)-[:USED]->(d:Device)<-[:USED]-(b:Subscriber)
+      WHERE a.number < b.number
+      RETURN d.imei, collect(a.number)+collect(b.number) LIMIT 10;" \
+  | docker compose exec -T memgraph mgconsole
+```
+
+### Reseeding
+
+The ingest job is idempotent — it skips if CDRs already exist. To wipe and
+regenerate, set `FORCE_RESEED=true` for the `ingest` service (or
+`docker compose down -v` to drop the ClickHouse volume) and bring it back up.
+
+## Data model
+
+See `clickhouse/schema.sql` (CDR table, rollups, callee projection — documented
+inline) and `ingest/graph_queries.cypher` (graph model + shared-device and
+co-located-tower detection).
+
+## Auth seam (out of scope, stubbed)
+
+Warrant/court authorization is intentionally **not** implemented. Two clean
+seams are left so it slots in later without reshaping anything:
+
+- `api/middleware.go` — a pass-through `authMiddleware` on every route; warrant
+  checks go here.
+- `clickhouse/schema.sql` — an unused `warrant_id String DEFAULT ''` column on
+  the CDR table for later filtering.
