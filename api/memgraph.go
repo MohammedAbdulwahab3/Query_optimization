@@ -263,35 +263,31 @@ func (s *MGStore) Link(ctx context.Context, a, b string) (*LinkResult, error) {
 		return nil, err
 	}
 
-	// Shortest path through the contact graph (Memgraph BFS).
+	// Shortest path through the contact graph (Memgraph BFS). Return the path
+	// object and parse it driver-side — avoids list-comprehension / size()
+	// forms that some Memgraph versions reject in RETURN.
 	r, err = sess.Run(ctx, `
 		MATCH p = (a:Subscriber {number: $a})-[:CALLED *BFS]-(b:Subscriber {number: $b})
-		RETURN [n IN nodes(p) | n.number] AS numbers,
-		       [n IN nodes(p) | n.name] AS names,
-		       size(relationships(p)) AS hops
+		RETURN p
 		LIMIT 1`, params)
 	if err != nil {
 		return nil, err
 	}
 	if r.Next(ctx) {
-		nums := asStringSlice(mustGet(r.Record(), "numbers"))
-		names := asStringSlice(mustGet(r.Record(), "names"))
-		h, _ := r.Record().Get("hops")
-		res.Hops = asInt64(h)
-		for i := range nums {
-			name := ""
-			if i < len(names) {
-				name = names[i]
+		if pv, ok := r.Record().Get("p"); ok {
+			if path, ok := pv.(neo4j.Path); ok {
+				for _, n := range path.Nodes {
+					num, _ := n.Props["number"].(string)
+					name, _ := n.Props["name"].(string)
+					res.Path = append(res.Path, PathHop{Number: num, Name: name})
+				}
+				if len(path.Nodes) > 0 {
+					res.Hops = int64(len(path.Nodes) - 1)
+				}
 			}
-			res.Path = append(res.Path, PathHop{Number: nums[i], Name: name})
 		}
 	}
 	return res, r.Err()
-}
-
-func mustGet(rec *neo4j.Record, key string) any {
-	v, _ := rec.Get(key)
-	return v
 }
 
 // --- small type coercion helpers for Bolt's any-typed values ---
